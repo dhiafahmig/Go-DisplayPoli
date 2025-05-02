@@ -28,6 +28,12 @@ func (h *SettingPoliHandler) HandleSettings(c *gin.Context) {
 	})
 }
 
+// GetAllPoli mengembalikan daftar semua poli dalam format JSON
+func (h *SettingPoliHandler) GetAllPoli(c *gin.Context) {
+	poliList := h.getAllPoli()
+	c.JSON(http.StatusOK, poliList)
+}
+
 // AddPoli menambahkan poli baru
 func (h *SettingPoliHandler) AddPoli(c *gin.Context) {
 	var input struct {

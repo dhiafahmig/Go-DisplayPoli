@@ -19,11 +19,17 @@ func NewSettingDisplayPoliHandler(db *gorm.DB) *SettingDisplayPoliHandler {
 
 // HandleSettings menampilkan halaman pengaturan display poli
 func (h *SettingDisplayPoliHandler) HandleSettings(c *gin.Context) {
-	displays := h.getDisplays()
+	displays := h.getAllDisplay()
 
 	c.HTML(http.StatusOK, "settingdisplaypoli.html", gin.H{
 		"Displays": displays,
 	})
+}
+
+// GetAllDisplay mengembalikan daftar semua display dalam format JSON
+func (h *SettingDisplayPoliHandler) GetAllDisplay(c *gin.Context) {
+	displays := h.getAllDisplay()
+	c.JSON(http.StatusOK, displays)
 }
 
 // AddDisplay menambahkan display poli baru
@@ -121,8 +127,8 @@ func (h *SettingDisplayPoliHandler) DeleteDisplay(c *gin.Context) {
 	})
 }
 
-// getDisplays mendapatkan daftar display poli
-func (h *SettingDisplayPoliHandler) getDisplays() []map[string]interface{} {
+// getAllDisplay mendapatkan daftar semua display
+func (h *SettingDisplayPoliHandler) getAllDisplay() []map[string]interface{} {
 	var results []map[string]interface{}
 	h.DB.Table("bw_display_poli").
 		Select("bw_display_poli.kd_display, bw_display_poli.nama_display").

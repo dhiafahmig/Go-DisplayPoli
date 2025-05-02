@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -53,6 +54,14 @@ func init() {
 
 func main() {
 	r := gin.Default()
+
+	// Tambahkan template functions sebelum load template
+	r.SetFuncMap(template.FuncMap{
+		"add": func(a, b int) int {
+			return a + b
+		},
+	})
+
 	r.LoadHTMLGlob("templates/*")
 	r.Static("/assets", "./assets")
 
@@ -79,6 +88,7 @@ func main() {
 	// API untuk pengaturan display
 	displayGroup := r.Group("/api/display")
 	{
+		displayGroup.GET("/", settingDisplayPoliHandler.GetAllDisplay)
 		displayGroup.POST("/", settingDisplayPoliHandler.AddDisplay)
 		displayGroup.PUT("/", settingDisplayPoliHandler.EditDisplay)
 		displayGroup.DELETE("/:kd_display", settingDisplayPoliHandler.DeleteDisplay)
@@ -87,6 +97,7 @@ func main() {
 	// API untuk pengaturan poli
 	poliGroup := r.Group("/api/poli")
 	{
+		poliGroup.GET("/", settingPoliHandler.GetAllPoli)
 		poliGroup.POST("/", settingPoliHandler.AddPoli)
 		poliGroup.PUT("/", settingPoliHandler.EditPoli)
 		poliGroup.DELETE("/:kd_ruang_poli", settingPoliHandler.DeletePoli)

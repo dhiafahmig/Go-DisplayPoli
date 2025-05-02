@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pengaturan Display Poli</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4">Pengaturan Display Poli</h1>
+        
+        <div class="card mb-4">
+            <div class="card-header">
+                Tambah Display Baru
+            </div>
+            <div class="card-body">
+                <form id="addDisplayForm">
+                    <div class="mb-3">
+                        <label for="kd_display" class="form-label">Kode Display</label>
+                        <input type="text" class="form-control" id="kd_display" name="kd_display" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="nama_display" class="form-label">Nama Display</label>
+                        <input type="text" class="form-control" id="nama_display" name="nama_display" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Simpan</button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                Daftar Display
+            </div>
+            <div class="card-body">
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Kode Display</th>
+                            <th>Nama Display</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="displayList">
+                        <!-- List of displays will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for editing display -->
+    <div class="modal fade" id="editDisplayModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Display</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editDisplayForm">
+                        <input type="hidden" id="edit_kd_display" name="kd_display">
+                        <div class="mb-3">
+                            <label for="edit_nama_display" class="form-label">Nama Display</label>
+                            <input type="text" class="form-control" id="edit_nama_display" name="nama_display" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+                    <button type="button" class="btn btn-primary" id="saveEditBtn">Simpan</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Load displays
+        function loadDisplays() {
+            fetch('/api/display')
+                .then(response => response.json())
+                .then(data => {
+                    const displayList = document.getElementById('displayList');
+                    displayList.innerHTML = '';
+                    
+                    data.forEach(display => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${display.kd_display}</td>
+                            <td>${display.nama_display}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary edit-btn" data-kd="${display.kd_display}" data-nama="${display.nama_display}">Edit</button>
+                                <button class="btn btn-sm btn-danger delete-btn" data-kd="${display.kd_display}">Hapus</button>
+                            </td>
+                        `;
+                        displayList.appendChild(row);
+                    });
+                    
+                    // Add event listeners
+                    document.querySelectorAll('.edit-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const kd = this.getAttribute('data-kd');
+                            const nama = this.getAttribute('data-nama');
+                            
+                            document.getElementById('edit_kd_display').value = kd;
+                            document.getElementById('edit_nama_display').value = nama;
+                            
+                            new bootstrap.Modal(document.getElementById('editDisplayModal')).show();
+                        });
+                    });
+                    
+                    document.querySelectorAll('.delete-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const kd = this.getAttribute('data-kd');
+                            if (confirm(`Apakah Anda yakin ingin menghapus display dengan kode ${kd}?`)) {
+                                deleteDisplay(kd);
+                            }
+                        });
+                    });
+                })
+                .catch(error => console.error('Error loading displays:', error));
+        }
+        
+        // Add new display
+        document.getElementById('addDisplayForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = {
+                kd_display: document.getElementById('kd_display').value,
+                nama_display: document.getElementById('nama_display').value
+            };
+            
+            fetch('/api/display', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert('Display berhasil ditambahkan');
+                document.getElementById('addDisplayForm').reset();
+                loadDisplays();
+            })
+            .catch(error => console.error('Error adding display:', error));
+        });
+        
+        // Edit display
+        document.getElementById('saveEditBtn').addEventListener('click', function() {
+            const formData = {
+                kd_display: document.getElementById('edit_kd_display').value,
+                nama_display: document.getElementById('edit_nama_display').value
+            };
+            
+            fetch('/api/display', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert('Display berhasil diperbarui');
+                bootstrap.Modal.getInstance(document.getElementById('editDisplayModal')).hide();
+                loadDisplays();
+            })
+            .catch(error => console.error('Error updating display:', error));
+        });
+        
+        // Delete display
+        function deleteDisplay(kdDisplay) {
+            fetch(`/api/display/${kdDisplay}`, {
+                method: 'DELETE'
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert('Display berhasil dihapus');
+                loadDisplays();
+            })
+            .catch(error => console.error('Error deleting display:', error));
+        }
+        
+        // Load displays when page loads
+        document.addEventListener('DOMContentLoaded', loadDisplays);
+    </script>
+</body>
+</html> 
