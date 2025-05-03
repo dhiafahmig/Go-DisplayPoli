@@ -33,6 +33,13 @@ func (h *DisplayPoliHandler) HandleDisplay(c *gin.Context) {
 	})
 }
 
+// GetPoliListByDisplay mendapatkan daftar poli untuk API
+func (h *DisplayPoliHandler) GetPoliListByDisplay(c *gin.Context) {
+	kdDisplay := c.Param("kd_display")
+	poliList := h.getPoliList(kdDisplay)
+	c.JSON(http.StatusOK, poliList)
+}
+
 // getPoliList mendapatkan daftar poli berdasarkan kode display
 func (h *DisplayPoliHandler) getPoliList(kdDisplay string) []map[string]interface{} {
 	var results []map[string]interface{}

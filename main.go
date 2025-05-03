@@ -22,7 +22,10 @@ var (
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin: func(r *http.Request) bool {
-			return true
+			// Log origin untuk debugging
+			origin := r.Header.Get("Origin")
+			log.Printf("WebSocket connection request from Origin: %s", origin)
+			return true // Allow all origins for WebSocket
 		},
 	}
 	clients     = make(map[*websocket.Conn]bool)
@@ -53,6 +56,9 @@ func init() {
 }
 
 func main() {
+	// Aktifkan mode debug untuk log yang lebih detail
+	gin.SetMode(gin.DebugMode)
+
 	r := gin.Default()
 
 	// Tambahkan template functions sebelum load template
@@ -64,6 +70,22 @@ func main() {
 
 	r.LoadHTMLGlob("templates/*")
 	r.Static("/assets", "./assets")
+
+	// Konfigurasi CORS dengan lebih lengkap
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+		// Handle pre-flight OPTIONS requests
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
 
 	// Inisialisasi handlers
 	displayPoliHandler := handlers.NewDisplayPoliHandler(db)
@@ -84,6 +106,9 @@ func main() {
 	r.GET("/settings/dokter", settingPosisiDokterHandler.HandleSettings)
 	r.GET("/jadwal/dokter", jadwalDokterHandler.HandleJadwal)
 	r.GET("/panggilpoli/:kd_ruang_poli/:kd_display", panggilPoliHandler.HandlePanggil)
+
+	// API untuk aplikasi React
+	r.GET("/api/display/poli/:kd_display", displayPoliHandler.GetPoliListByDisplay)
 
 	// API untuk pengaturan display
 	displayGroup := r.Group("/api/display")
@@ -133,6 +158,17 @@ func main() {
 	r.POST("/api/log", panggilPoliHandler.HandleLog)
 	r.POST("/api/log/reset/:no_rawat", panggilPoliHandler.ResetLog)
 
+	// Serve aplikasi React
+	r.NoRoute(func(c *gin.Context) {
+		// Coba gunakan app build React jika tersedia
+		path := "./react-app/build" + c.Request.URL.Path
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			c.File("./react-app/build/index.html")
+			return
+		}
+		c.File(path)
+	})
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -146,21 +182,46 @@ func main() {
 
 func handleWebsocket(c *gin.Context) {
 	kdDisplay := c.Param("kd_display")
-	log.Printf("WebSocket connection established for display: %s", kdDisplay)
+
+	// Log headers untuk debugging
+	log.Printf("WebSocket connection attempt for display: %s", kdDisplay)
+	log.Printf("Headers: %+v", c.Request.Header)
+
+	// Mencoba upgrade dengan error handling yang lebih baik
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("Error upgrading connection: %v", err)
 		return
 	}
-	defer conn.Close()
+
+	// Log successful connection
+	remoteAddr := conn.RemoteAddr().String()
+	log.Printf("WebSocket connection established from %s for display: %s", remoteAddr, kdDisplay)
+
+	defer func() {
+		conn.Close()
+		log.Printf("WebSocket connection closed for %s", remoteAddr)
+	}()
 
 	clients[conn] = true
+
+	// Send initial message to confirm connection
+	initialMsg := handlers.PanggilPoliMessage{
+		KdDisplay:   kdDisplay,
+		KdRuangPoli: "INITIAL",   // Tambahkan field yang diperlukan
+		NmPasien:    "Connected", // Tambahkan informasi koneksi
+		NoReg:       "0",
+	}
+
+	if err := conn.WriteJSON(initialMsg); err != nil {
+		log.Printf("Error sending initial message: %v", err)
+	}
 
 	for {
 		// Keep connection alive
 		_, _, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("Error on websocket connection: %v", err)
+			log.Printf("WebSocket connection closed for %s: %v", remoteAddr, err)
 			delete(clients, conn)
 			break
 		}
@@ -170,6 +231,7 @@ func handleWebsocket(c *gin.Context) {
 func handleMessages() {
 	for {
 		msg := <-broadcaster
+		log.Printf("Broadcasting message for display %s, poli %s", msg.KdDisplay, msg.KdRuangPoli)
 
 		for client := range clients {
 			err := client.WriteJSON(msg)
