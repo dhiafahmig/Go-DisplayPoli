@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
@@ -71,21 +73,15 @@ func main() {
 	r.LoadHTMLGlob("templates/*")
 	r.Static("/assets", "./assets")
 
-	// Konfigurasi CORS dengan lebih lengkap
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-
-		// Handle pre-flight OPTIONS requests
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
+	// Konfigurasi CORS dengan gin-contrib/cors
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// Inisialisasi handlers
 	displayPoliHandler := handlers.NewDisplayPoliHandler(db)
@@ -94,12 +90,14 @@ func main() {
 	settingPosisiDokterHandler := handlers.NewSettingPosisiDokterHandler(db)
 	jadwalDokterHandler := handlers.NewJadwalDokterHandler(db)
 	panggilPoliHandler := handlers.NewPanggilPoliHandler(db)
+	panggilPoliHandler.SetBroadcaster(broadcaster)
 
 	// Memulai broadcaster
 	go handleMessages()
 
 	// Rutekan API Halaman
 	r.GET("/ws/:kd_display", handleWebsocket)
+	r.GET("/ws/antrian/:kd_ruang_poli", panggilPoliHandler.HandleAntrianWebSocket)
 	r.GET("/display/:kd_display", displayPoliHandler.HandleDisplay)
 	r.GET("/settings/display", settingDisplayPoliHandler.HandleSettings)
 	r.GET("/settings/poli", settingPoliHandler.HandleSettings)
@@ -109,6 +107,8 @@ func main() {
 
 	// API untuk aplikasi React
 	r.GET("/api/display/poli/:kd_display", displayPoliHandler.GetPoliListByDisplay)
+	r.GET("/api/panggil/:kd_ruang_poli", panggilPoliHandler.HandlePanggilAPI)
+	r.GET("/api/antrian/poli/:kd_ruang_poli", panggilPoliHandler.HandleAntrianPoliAPI)
 
 	// API untuk pengaturan display
 	displayGroup := r.Group("/api/display")
@@ -144,19 +144,14 @@ func main() {
 	}
 
 	// API untuk antrian pasien
-	r.POST("/api/panggilpoli", func(c *gin.Context) {
-		var msg handlers.PanggilPoliMessage
-		if err := c.ShouldBindJSON(&msg); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		broadcaster <- msg
-		c.JSON(http.StatusOK, gin.H{"message": "Panggilkan berhasil"})
-	})
+	r.POST("/api/panggilpoli", panggilPoliHandler.PanggilPasien)
+	r.POST("/api/panggilpasien", panggilPoliHandler.PanggilPasien)
+	r.POST("/api/antrian/panggil", panggilPoliHandler.PanggilPasienAPI)
 
 	r.POST("/api/log", panggilPoliHandler.HandleLog)
 	r.POST("/api/log/reset/:no_rawat", panggilPoliHandler.ResetLog)
+	r.POST("/api/antrian/log", panggilPoliHandler.HandleLogAPI)
+	r.POST("/api/antrian/log/reset/:no_rawat", panggilPoliHandler.ResetLogAPI)
 
 	// Serve aplikasi React
 	r.NoRoute(func(c *gin.Context) {

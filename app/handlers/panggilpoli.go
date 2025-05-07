@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 
 	"github.com/dhiafahmig/Go-DisplayPoli/app/services"
@@ -12,12 +14,18 @@ import (
 
 // PanggilPoliHandler menangani tampilan memanggil pasien di poli
 type PanggilPoliHandler struct {
-	DB *gorm.DB
+	DB          *gorm.DB
+	Broadcaster chan<- PanggilPoliMessage // Channel untuk broadcast pesan
 }
 
 // NewPanggilPoliHandler membuat instance baru dari PanggilPoliHandler
 func NewPanggilPoliHandler(db *gorm.DB) *PanggilPoliHandler {
 	return &PanggilPoliHandler{DB: db}
+}
+
+// SetBroadcaster menetapkan channel broadcaster untuk handler ini
+func (h *PanggilPoliHandler) SetBroadcaster(broadcaster chan<- PanggilPoliMessage) {
+	h.Broadcaster = broadcaster
 }
 
 // HandlePanggil menampilkan halaman panggil poli
@@ -96,10 +104,74 @@ func (h *PanggilPoliHandler) PanggilPasien(c *gin.Context) {
 		return
 	}
 
-	// Di sini kita menggunakan channel broadcaster dari main.go
-	// untuk mengirim pesan ke semua klien websocket
+	// Buat pesan untuk dikirim ke websocket
+	msg := PanggilPoliMessage{
+		NmPasien:    input.NmPasien,
+		KdRuangPoli: input.KdRuangPoli,
+		NmPoli:      input.NmPoli,
+		NoReg:       input.NoReg,
+		KdDisplay:   input.KdDisplay,
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Panggilan berhasil dikirim"})
+	// Kirim ke broadcaster jika tersedia
+	if h.Broadcaster != nil {
+		log.Printf("Mengirim pesan panggil ke broadcaster: %+v", msg)
+		h.Broadcaster <- msg
+	} else {
+		log.Printf("Broadcaster tidak tersedia, tidak bisa mengirim pesan: %+v", msg)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Panggilan berhasil dikirim",
+		"data":    msg,
+	})
+}
+
+// PanggilPasienAPI adalah API khusus untuk memanggil pasien di antrian
+func (h *PanggilPoliHandler) PanggilPasienAPI(c *gin.Context) {
+	var input struct {
+		NmPasien    string `json:"nm_pasien" binding:"required"`
+		KdRuangPoli string `json:"kd_ruang_poli" binding:"required"`
+		NmPoli      string `json:"nm_poli" binding:"required"`
+		NoReg       string `json:"no_reg" binding:"required"`
+		KdDisplay   string `json:"kd_display" binding:"required"`
+		NoRawat     string `json:"no_rawat" binding:"omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Format data tidak valid: " + err.Error(),
+		})
+		return
+	}
+
+	// Buat pesan untuk dikirim ke websocket
+	msg := PanggilPoliMessage{
+		NmPasien:    input.NmPasien,
+		KdRuangPoli: input.KdRuangPoli,
+		NmPoli:      input.NmPoli,
+		NoReg:       input.NoReg,
+		KdDisplay:   input.KdDisplay,
+	}
+
+	// Kirim ke broadcaster jika tersedia
+	if h.Broadcaster != nil {
+		log.Printf("Mengirim pesan panggil ke broadcaster: %+v", msg)
+		h.Broadcaster <- msg
+	} else {
+		log.Printf("Broadcaster tidak tersedia, tidak bisa mengirim pesan: %+v", msg)
+	}
+
+	// Mengembalikan response dalam format JSON
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"data": gin.H{
+			"message": msg,
+		},
+		"message": "Pasien berhasil dipanggil",
+	})
 }
 
 // getPasienList mendapatkan daftar pasien untuk poli tertentu
@@ -124,4 +196,171 @@ func (h *PanggilPoliHandler) getPasienList(kdRuangPoli string) []map[string]inte
 		Find(&results)
 
 	return results
+}
+
+// HandleAntrianWebSocket menangani koneksi WebSocket untuk pembaruan antrian
+func (h *PanggilPoliHandler) HandleAntrianWebSocket(c *gin.Context) {
+	kdRuangPoli := c.Param("kd_ruang_poli")
+
+	// Upgrade koneksi HTTP ke WebSocket
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer conn.Close()
+
+	// Log successful connection
+	remoteAddr := conn.RemoteAddr().String()
+	log.Printf("WebSocket antrian connection established from %s for poli: %s", remoteAddr, kdRuangPoli)
+
+	// Daftarkan koneksi ke channel broadcast
+	// TODO: Implementasikan sistem broadcast
+
+	// Send initial message to confirm connection
+	initialMsg := PanggilPoliMessage{
+		KdRuangPoli: kdRuangPoli,
+		NmPasien:    "Connected",
+		NoReg:       "0",
+	}
+
+	if err := conn.WriteJSON(initialMsg); err != nil {
+		log.Printf("Error sending initial antrian message: %v", err)
+	}
+
+	// Tangani pesan yang masuk
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			log.Printf("WebSocket antrian connection closed for %s: %v", remoteAddr, err)
+			break
+		}
+	}
+}
+
+// HandlePanggilAPI menangani permintaan API dari frontend React untuk halaman panggil poli
+func (h *PanggilPoliHandler) HandlePanggilAPI(c *gin.Context) {
+	kdRuangPoli := c.Param("kd_ruang_poli")
+	pasienList := h.getPasienList(kdRuangPoli)
+
+	// Dapatkan informasi poli
+	var poliInfo map[string]interface{}
+	h.DB.Table("bw_ruangpoli").
+		Select("kd_ruang_poli, nama_ruang_poli").
+		Where("kd_ruang_poli = ?", kdRuangPoli).
+		First(&poliInfo)
+
+	// Kirim sebagai JSON
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"poli_info":   poliInfo,
+			"pasien_list": pasienList,
+		},
+		"message": "Data pasien berhasil dimuat",
+	})
+}
+
+// HandleAntrianPoliAPI menangani permintaan API untuk mendapatkan daftar antrian pada poli tertentu
+func (h *PanggilPoliHandler) HandleAntrianPoliAPI(c *gin.Context) {
+	kdRuangPoli := c.Param("kd_ruang_poli")
+
+	// Mendapatkan data dari database
+	pasienList := h.getPasienList(kdRuangPoli)
+
+	// Mendapatkan informasi poli
+	var poliInfo map[string]interface{}
+	h.DB.Table("bw_ruangpoli").
+		Select("kd_ruang_poli, nama_ruang_poli").
+		Where("kd_ruang_poli = ?", kdRuangPoli).
+		First(&poliInfo)
+
+	// Mengembalikan response dalam format JSON
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"data": gin.H{
+			"poli_info": poliInfo,
+			"antrian":   pasienList,
+		},
+		"message": "Data antrian berhasil diambil",
+	})
+}
+
+// HandleLogAPI menangani API untuk mengupdate status log antrian pasien
+func (h *PanggilPoliHandler) HandleLogAPI(c *gin.Context) {
+	var input struct {
+		KdDokter    string `json:"kd_dokter"`
+		NoRawat     string `json:"no_rawat" binding:"required"`
+		KdRuangPoli string `json:"kd_ruang_poli" binding:"required"`
+		Type        string `json:"type" binding:"required"` // 'ada' atau 'tidak'
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Format data tidak valid: " + err.Error(),
+		})
+		return
+	}
+
+	status := "1" // default: tidak ada
+	if input.Type == "ada" {
+		status = "0"
+	}
+
+	// Update or insert log
+	result := h.DB.Exec(`
+		INSERT INTO bw_log_antrian_poli (no_rawat, kd_ruang_poli, status)
+		VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE kd_ruang_poli = ?, status = ?
+	`, input.NoRawat, input.KdRuangPoli, status, input.KdRuangPoli, status)
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Gagal mengupdate status: " + result.Error.Error(),
+		})
+		return
+	}
+
+	// Mengembalikan response dalam format JSON
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"data": gin.H{
+			"no_rawat":      input.NoRawat,
+			"kd_ruang_poli": input.KdRuangPoli,
+			"status":        status,
+		},
+		"message": "Status pasien berhasil diperbarui",
+	})
+}
+
+// ResetLogAPI menangani API untuk menghapus log antrian pasien
+func (h *PanggilPoliHandler) ResetLogAPI(c *gin.Context) {
+	noRawat := c.Param("no_rawat")
+
+	result := h.DB.Table("bw_log_antrian_poli").Where("no_rawat = ?", noRawat).Delete(nil)
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Gagal mereset status: " + result.Error.Error(),
+		})
+		return
+	}
+
+	// Mengembalikan response dalam format JSON
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"data": gin.H{
+			"no_rawat": noRawat,
+		},
+		"message": "Reset log berhasil",
+	})
 }
