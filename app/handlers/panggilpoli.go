@@ -1,12 +1,17 @@
 package handlers
 
 import (
+	"crypto/md5"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	htgotts "github.com/hegedustibor/htgo-tts"
 	"gorm.io/gorm"
 
 	"github.com/dhiafahmig/Go-DisplayPoli/app/services"
@@ -89,6 +94,34 @@ func (h *PanggilPoliHandler) ResetLog(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Reset log berhasil"})
 }
 
+// generateTTS menghasilkan file audio dari teks dan mengembalikan URL relatif
+func (h *PanggilPoliHandler) generateTTS(text, kdRuangPoli, noReg string) (string, error) {
+	// Buat hash dari teks untuk nama file unik
+	hasher := md5.New()
+	hasher.Write([]byte(text + kdRuangPoli + noReg + time.Now().String()))
+	filename := hex.EncodeToString(hasher.Sum(nil)) + ".mp3"
+
+	// Pastikan direktori audio ada
+	audioDir := "assets/audio"
+	if _, err := os.Stat(audioDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(audioDir, 0755); err != nil {
+			return "", err
+		}
+	}
+
+	// Buat instance TTS
+	speech := htgotts.Speech{
+		Folder:   audioDir,
+		Language: "id",
+	}
+
+	// Generate audio file
+	speech.CreateSpeechFile(text, filename)
+
+	// Kembalikan URL relatif
+	return "/assets/audio/" + filename, nil
+}
+
 // PanggilPasien mengirim event untuk memanggil pasien
 func (h *PanggilPoliHandler) PanggilPasien(c *gin.Context) {
 	var input struct {
@@ -104,6 +137,17 @@ func (h *PanggilPoliHandler) PanggilPasien(c *gin.Context) {
 		return
 	}
 
+	// Buat teks untuk TTS
+	ttsText := fmt.Sprintf("Nomor antrian %s, atas nama %s, silakan menuju %s",
+		input.NoReg, input.NmPasien, input.NmPoli)
+
+	// Generate file audio TTS
+	audioUrl, err := h.generateTTS(ttsText, input.KdRuangPoli, input.NoReg)
+	if err != nil {
+		log.Printf("Error generating TTS: %v", err)
+		// Lanjutkan meskipun TTS gagal
+	}
+
 	// Buat pesan untuk dikirim ke websocket
 	msg := PanggilPoliMessage{
 		NmPasien:    input.NmPasien,
@@ -111,6 +155,7 @@ func (h *PanggilPoliHandler) PanggilPasien(c *gin.Context) {
 		NmPoli:      input.NmPoli,
 		NoReg:       input.NoReg,
 		KdDisplay:   input.KdDisplay,
+		AudioUrl:    audioUrl,
 	}
 
 	// Kirim ke broadcaster jika tersedia
@@ -147,6 +192,17 @@ func (h *PanggilPoliHandler) PanggilPasienAPI(c *gin.Context) {
 		return
 	}
 
+	// Buat teks untuk TTS
+	ttsText := fmt.Sprintf("Nomor antrian %s, atas nama %s, silakan menuju %s",
+		input.NoReg, input.NmPasien, input.NmPoli)
+
+	// Generate file audio TTS
+	audioUrl, err := h.generateTTS(ttsText, input.KdRuangPoli, input.NoReg)
+	if err != nil {
+		log.Printf("Error generating TTS: %v", err)
+		// Lanjutkan meskipun TTS gagal
+	}
+
 	// Buat pesan untuk dikirim ke websocket
 	msg := PanggilPoliMessage{
 		NmPasien:    input.NmPasien,
@@ -154,6 +210,7 @@ func (h *PanggilPoliHandler) PanggilPasienAPI(c *gin.Context) {
 		NmPoli:      input.NmPoli,
 		NoReg:       input.NoReg,
 		KdDisplay:   input.KdDisplay,
+		AudioUrl:    audioUrl,
 	}
 
 	// Kirim ke broadcaster jika tersedia

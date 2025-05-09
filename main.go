@@ -70,7 +70,6 @@ func main() {
 		},
 	})
 
-	r.LoadHTMLGlob("templates/*")
 	r.Static("/assets", "./assets")
 
 	// Konfigurasi CORS dengan gin-contrib/cors

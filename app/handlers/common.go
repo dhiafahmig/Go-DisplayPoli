@@ -7,4 +7,5 @@ type PanggilPoliMessage struct {
 	NmPoli      string `json:"nm_poli"`
 	NoReg       string `json:"no_reg"`
 	KdDisplay   string `json:"kd_display"`
+	AudioUrl    string `json:"audio_url"` // URL file audio TTS
 }
