@@ -125,6 +125,7 @@ func main() {
 		poliGroup.POST("/", settingPoliHandler.AddPoli)
 		poliGroup.PUT("/", settingPoliHandler.EditPoli)
 		poliGroup.DELETE("/:kd_ruang_poli", settingPoliHandler.DeletePoli)
+		poliGroup.GET("/dokter/:kd_ruang_poli", settingPoliHandler.GetDokterPoli)
 	}
 
 	// API untuk pengaturan posisi dokter

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -156,4 +157,89 @@ func (h *SettingPoliHandler) getAllPoli() []map[string]interface{} {
 		Find(&results)
 
 	return results
+}
+
+// GetDokterPoli menangani permintaan untuk mendapatkan daftar dokter pada poli tertentu
+func (h *SettingPoliHandler) GetDokterPoli(c *gin.Context) {
+	kdRuangPoli := c.Param("kd_ruang_poli")
+
+	// Log untuk debugging
+	log.Printf("Mencari dokter untuk poli: %s", kdRuangPoli)
+
+	// Tampilkan daftar semua poli yang tersedia (untuk debugging)
+	var semuaPoli []map[string]interface{}
+	h.DB.Table("bw_ruang_poli").Find(&semuaPoli)
+	log.Printf("Daftar semua poli yang tersedia: %+v", semuaPoli)
+
+	// Periksa apakah poli ada
+	var poliCount int64
+	h.DB.Table("bw_ruang_poli").Where("kd_ruang_poli = ?", kdRuangPoli).Count(&poliCount)
+	log.Printf("Jumlah poli dengan kode %s: %d", kdRuangPoli, poliCount)
+
+	// Coba tampilkan juga poli yang serupa (jika poli tidak ditemukan)
+	if poliCount == 0 {
+		var poliSimilar []map[string]interface{}
+		h.DB.Table("bw_ruang_poli").Limit(5).Find(&poliSimilar)
+		log.Printf("Poli tidak ditemukan. Beberapa poli yang tersedia: %+v", poliSimilar)
+
+		// Tetap lanjutkan karena kita ingin mengembalikan data kosong, bukan error
+	}
+
+	// Mendapatkan informasi poli
+	var poliInfo map[string]interface{}
+	poliResult := h.DB.Table("bw_ruang_poli").
+		Select("kd_ruang_poli, nama_ruang_poli").
+		Where("kd_ruang_poli = ?", kdRuangPoli).
+		First(&poliInfo)
+
+	if poliResult.Error != nil {
+		log.Printf("Error saat mengambil informasi poli: %v", poliResult.Error)
+		// Tetap lanjutkan dengan nilai default
+		poliInfo = map[string]interface{}{
+			"kd_ruang_poli":   kdRuangPoli,
+			"nama_ruang_poli": "Tidak ditemukan",
+		}
+	} else {
+		log.Printf("Informasi poli: %+v", poliInfo)
+	}
+
+	// Mendapatkan daftar dokter dari database
+	var dokters []map[string]interface{}
+
+	// Tampilkan juga tabel bw_ruangpoli_dokter untuk debugging
+	var allDokters []map[string]interface{}
+	h.DB.Table("bw_ruangpoli_dokter").Limit(5).Find(&allDokters)
+	log.Printf("Sampel data tabel bw_ruangpoli_dokter: %+v", allDokters)
+
+	// Query untuk mendapatkan dokter dengan nm_poli dari tabel poliklinik
+	result := h.DB.Table("bw_ruangpoli_dokter").
+		Select("bw_ruangpoli_dokter.kd_dokter, bw_ruangpoli_dokter.nama_dokter, dokter.jk, bw_ruangpoli_dokter.kd_ruang_poli, bw_ruang_poli.nama_ruang_poli, poliklinik.nm_poli").
+		Joins("LEFT JOIN dokter ON bw_ruangpoli_dokter.kd_dokter = dokter.kd_dokter").
+		Joins("LEFT JOIN bw_ruang_poli ON bw_ruangpoli_dokter.kd_ruang_poli = bw_ruang_poli.kd_ruang_poli").
+		Joins("LEFT JOIN jadwal ON bw_ruangpoli_dokter.kd_dokter = jadwal.kd_dokter").
+		Joins("LEFT JOIN poliklinik ON jadwal.kd_poli = poliklinik.kd_poli").
+		Where("bw_ruangpoli_dokter.kd_ruang_poli = ?", kdRuangPoli).
+		Order("bw_ruangpoli_dokter.nama_dokter ASC").
+		Find(&dokters)
+
+	if result.Error != nil {
+		log.Printf("Error saat mengambil data dokter: %v", result.Error)
+		// Tetap lanjutkan dengan array kosong
+		dokters = []map[string]interface{}{}
+	}
+
+	log.Printf("Jumlah dokter ditemukan: %d", len(dokters))
+	if len(dokters) > 0 {
+		log.Printf("Contoh data dokter pertama: %+v", dokters[0])
+	}
+
+	// Mengembalikan response dalam format JSON
+	c.JSON(http.StatusOK, gin.H{
+		"status": "success",
+		"data": gin.H{
+			"poli_info": poliInfo,
+			"dokters":   dokters,
+		},
+		"message": "Data dokter berhasil diambil",
+	})
 }
