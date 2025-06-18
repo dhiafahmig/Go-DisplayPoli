@@ -102,12 +102,26 @@ func (h *JadwalDokterHandler) CariDokter(c *gin.Context) {
 	cariKode := c.Query("cari")
 
 	var dokter []map[string]interface{}
-	h.DB.Table("dokter").
-		Select("dokter.kd_dokter, dokter.nm_dokter, dokter.status").
-		Where("dokter.status = ?", "1").
-		Where("dokter.kd_dokter LIKE ? OR dokter.nm_dokter LIKE ?", "%"+cariKode+"%", "%"+cariKode+"%").
-		Limit(1).
+	query := h.DB.Table("dokter").
+		Select("dokter.kd_dokter, dokter.nm_dokter, dokter.status, " +
+			"GROUP_CONCAT(DISTINCT CONCAT(bw_jadwal_dokter.hari_kerja, ' ', bw_jadwal_dokter.jam_mulai, '-', bw_jadwal_dokter.jam_selesai) SEPARATOR ', ') as jadwal, " +
+			"GROUP_CONCAT(DISTINCT poliklinik.nm_poli SEPARATOR ', ') as poli").
+		Joins("LEFT JOIN bw_jadwal_dokter ON dokter.kd_dokter = bw_jadwal_dokter.kd_dokter").
+		Joins("LEFT JOIN poliklinik ON bw_jadwal_dokter.kd_poli = poliklinik.kd_poli")
+
+	if cariKode != "" {
+		query = query.Where("dokter.kd_dokter LIKE ? OR dokter.nm_dokter LIKE ?", "%"+cariKode+"%", "%"+cariKode+"%")
+	}
+
+	query.Where("dokter.status = ?", "1").
+		Group("dokter.kd_dokter").
 		Find(&dokter)
+
+	if len(dokter) == 0 {
+		// Jika tidak ada hasil, kirim array kosong bukan null
+		c.JSON(http.StatusOK, []map[string]interface{}{})
+		return
+	}
 
 	c.JSON(http.StatusOK, dokter)
 }
@@ -141,6 +155,46 @@ func (h *JadwalDokterHandler) TambahJadwalDokter(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Jadwal berhasil ditambahkan"})
+}
+
+// GetJadwalDokter mengembalikan daftar jadwal semua dokter atau jadwal spesifik dokter
+func (h *JadwalDokterHandler) GetJadwalDokter(c *gin.Context) {
+	kdDokter := c.Query("kd_dokter")
+	hari := c.Query("hari")
+
+	query := h.DB.Table("bw_jadwal_dokter").
+		Select(`
+            dokter.kd_dokter,
+            dokter.nm_dokter,
+            bw_jadwal_dokter.hari_kerja,
+            bw_jadwal_dokter.jam_mulai,
+            bw_jadwal_dokter.jam_selesai,
+            poliklinik.kd_poli,
+            poliklinik.nm_poli
+        `).
+		Joins("JOIN dokter ON bw_jadwal_dokter.kd_dokter = dokter.kd_dokter").
+		Joins("JOIN poliklinik ON bw_jadwal_dokter.kd_poli = poliklinik.kd_poli").
+		Where("dokter.status = ?", "1")
+
+	if kdDokter != "" {
+		query = query.Where("dokter.kd_dokter = ?", kdDokter)
+	}
+	if hari != "" {
+		query = query.Where("bw_jadwal_dokter.hari_kerja = ?", hari)
+	}
+
+	var jadwal []map[string]interface{}
+	if err := query.Find(&jadwal).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(jadwal) == 0 {
+		c.JSON(http.StatusOK, []map[string]interface{}{})
+		return
+	}
+
+	c.JSON(http.StatusOK, jadwal)
 }
 
 // getDokterByHari mendapatkan daftar dokter berdasarkan hari

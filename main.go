@@ -108,6 +108,7 @@ func main() {
 	r.GET("/api/display/poli/:kd_display", displayPoliHandler.GetPoliListByDisplay)
 	r.GET("/api/panggil/:kd_ruang_poli", panggilPoliHandler.HandlePanggilAPI)
 	r.GET("/api/antrian/poli/:kd_ruang_poli", panggilPoliHandler.HandleAntrianPoliAPI)
+	r.GET("/api/jadwal/dokter/all", jadwalDokterHandler.GetJadwalDokter) // Route baru untuk mendapatkan jadwal dokter
 
 	// API untuk pengaturan display
 	displayGroup := r.Group("/api/display")
