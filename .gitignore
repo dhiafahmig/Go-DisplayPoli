@@ -1,0 +1,24 @@
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Compiled binaries
+*.exe
+*.exe~
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependency directories
+/vendor/
+
+# Log files
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
