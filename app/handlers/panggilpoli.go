@@ -130,6 +130,7 @@ func (h *PanggilPoliHandler) PanggilPasien(c *gin.Context) {
 		NmPoli      string `json:"nm_poli" binding:"required"`
 		NoReg       string `json:"no_reg" binding:"required"`
 		KdDisplay   string `json:"kd_display" binding:"required"`
+		NoRawat     string `json:"no_rawat" binding:"omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -166,11 +167,52 @@ func (h *PanggilPoliHandler) PanggilPasien(c *gin.Context) {
 		log.Printf("Broadcaster tidak tersedia, tidak bisa mengirim pesan: %+v", msg)
 	}
 
+	// Tambahkan: Update status pasien di bw_log_antrian_poli untuk menandai pasien yang dipanggil
+	// Status "2" menandakan pasien sedang dipanggil
+	if input.NoRawat != "" {
+		// Hapus status "sedang dipanggil" (2) dari semua pasien di poli yang sama
+		h.DB.Exec(`
+			DELETE FROM bw_log_antrian_poli 
+			WHERE kd_ruang_poli = ? AND status = '2'
+		`, input.KdRuangPoli)
+
+		// Tambahkan status baru untuk pasien yang dipanggil
+		result := h.DB.Exec(`
+			INSERT INTO bw_log_antrian_poli (no_rawat, kd_ruang_poli, status)
+			VALUES (?, ?, '2')
+			ON DUPLICATE KEY UPDATE kd_ruang_poli = ?, status = '2'
+		`, input.NoRawat, input.KdRuangPoli, input.KdRuangPoli)
+
+		if result.Error != nil {
+			log.Printf("Error updating patient status: %v", result.Error)
+		}
+
+		// Jadwalkan reset status setelah 5 menit
+		go func(noRawat string) {
+			time.Sleep(5 * time.Minute)
+			h.resetCallingStatus(noRawat)
+		}(input.NoRawat)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Panggilan berhasil dikirim",
 		"data":    msg,
 	})
+}
+
+// resetCallingStatus mengembalikan status pasien dari "sedang dipanggil" (2) menjadi normal
+func (h *PanggilPoliHandler) resetCallingStatus(noRawat string) {
+	// Hapus status panggilan setelah 5 menit
+	result := h.DB.Table("bw_log_antrian_poli").
+		Where("no_rawat = ? AND status = '2'", noRawat).
+		Delete(nil)
+
+	if result.Error != nil {
+		log.Printf("Error resetting calling status: %v", result.Error)
+	} else {
+		log.Printf("Successfully reset calling status for patient: %s", noRawat)
+	}
 }
 
 // PanggilPasienAPI adalah API khusus untuk memanggil pasien di antrian
@@ -219,6 +261,33 @@ func (h *PanggilPoliHandler) PanggilPasienAPI(c *gin.Context) {
 		h.Broadcaster <- msg
 	} else {
 		log.Printf("Broadcaster tidak tersedia, tidak bisa mengirim pesan: %+v", msg)
+	}
+
+	// Tambahkan: Update status pasien di bw_log_antrian_poli untuk menandai pasien yang dipanggil
+	// Status "2" menandakan pasien sedang dipanggil
+	if input.NoRawat != "" {
+		// Hapus status "sedang dipanggil" (2) dari semua pasien di poli yang sama
+		h.DB.Exec(`
+			DELETE FROM bw_log_antrian_poli 
+			WHERE kd_ruang_poli = ? AND status = '2'
+		`, input.KdRuangPoli)
+
+		// Tambahkan status baru untuk pasien yang dipanggil
+		result := h.DB.Exec(`
+			INSERT INTO bw_log_antrian_poli (no_rawat, kd_ruang_poli, status)
+			VALUES (?, ?, '2')
+			ON DUPLICATE KEY UPDATE kd_ruang_poli = ?, status = '2'
+		`, input.NoRawat, input.KdRuangPoli, input.KdRuangPoli)
+
+		if result.Error != nil {
+			log.Printf("Error updating patient status: %v", result.Error)
+		}
+
+		// Jadwalkan reset status setelah 5 menit
+		go func(noRawat string) {
+			time.Sleep(5 * time.Minute)
+			h.resetCallingStatus(noRawat)
+		}(input.NoRawat)
 	}
 
 	// Mengembalikan response dalam format JSON
