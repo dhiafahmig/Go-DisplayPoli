@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -101,8 +102,8 @@ func (h *PanggilPoliHandler) generateTTS(text, kdRuangPoli, noReg string) (strin
 	hasher.Write([]byte(text + kdRuangPoli + noReg + time.Now().String()))
 	filename := hex.EncodeToString(hasher.Sum(nil)) + ".mp3"
 
-	// Pastikan direktori audio ada
-	audioDir := "assets/audio"
+	// Pastikan direktori temp audio ada di dalam assets
+	audioDir := "assets/temp_audio"
 	if _, err := os.Stat(audioDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(audioDir, 0755); err != nil {
 			return "", err
@@ -118,8 +119,17 @@ func (h *PanggilPoliHandler) generateTTS(text, kdRuangPoli, noReg string) (strin
 	// Generate audio file
 	speech.CreateSpeechFile(text, filename)
 
+	// Jadwalkan penghapusan file setelah 10 detik
+	go func() {
+		time.Sleep(10 * time.Second)
+		filePath := filepath.Join(audioDir, filename)
+		if err := os.Remove(filePath); err != nil {
+			log.Printf("Error removing audio file %s: %v", filePath, err)
+		}
+	}()
+
 	// Kembalikan URL relatif
-	return "/assets/audio/" + filename, nil
+	return "/assets/temp_audio/" + filename, nil
 }
 
 // PanggilPasien mengirim event untuk memanggil pasien
